@@ -1,78 +1,73 @@
-import { useEffect } from 'react';
-import { Alert, StyleSheet } from 'react-native';
+import { useState, useEffect } from 'react';
+import { Alert, FlatList, StyleSheet, Text } from 'react-native';
 
-import EditScreenInfo from '../components/EditScreenInfo';
-import { Text, View } from '../components/Themed';
-import { RootTabScreenProps } from '../types';
 import {
   generatePrivateKey,
-  validateEvent,
-  verifySignature,
-  signEvent,
   getEventHash,
   getPublicKey,
-  relayInit
+  relayInit,
+  signEvent
 } from 'nostr-tools'
 
+export default function TabOneScreen() {
+  const [messages, setMessages] = useState<any>([]);
 
-
-export default function TabOneScreen({ navigation }: RootTabScreenProps<'TabOne'>) {
   const connectToRelay = async () => {
-
-    const relay = relayInit('wss://nostr.semisol.dev')
+    const relay = relayInit('wss://nostr.oxtr.dev')
+    // const relay = relayInit('wss://nostr.semisol.dev')
     await relay.connect()
 
-    relay.on('connect', () => {
-      Alert.alert(`connected to ${relay.url}`)
+    // let's query for events of kind 1 and fetch the last 25 events
+    let sub = relay.sub([
+      {
+        kinds: [1],
+        limit: 25,
+      }
+    ])
+
+    sub.on('event', (event: any) => {
+      setMessages((prevMessages:any) => [...prevMessages, event]);
     })
-    relay.on('error', () => {
-      console.log(`failed to connect to ${relay.url}`)
-    })
 
-  // let's query for an event that exists
-  let sub = relay.sub([
-    {
-      kinds: [1],
-      limit: 3,
-    }
-  ])
 
-  sub.on('event', event => {
-    Alert.alert('Event:', JSON.stringify(event))
-  })
-  sub.on('eose', () => {
-    Alert.alert('eose')
-    sub.unsub()
-  })
+    let sk = generatePrivateKey() // `sk` is a hex string
+    let pk = getPublicKey(sk) // `pk` is a hex string
 
-  }
-  useEffect(() => {
-    let privateKey = generatePrivateKey() // `sk` is a hex string
-    let pubkey = getPublicKey(privateKey) // `pk` is a hex string
 
     let event: any = {
       kind: 1,
+      pubkey: pk,
       created_at: Math.floor(Date.now() / 1000),
       tags: [],
-      content: 'hello',
-      pubkey
+      content: 'hello world'
     }
-
     event.id = getEventHash(event)
-    event.sig = signEvent(event, privateKey)
+    event.sig = signEvent(event, sk)
 
-    let ok = validateEvent(event)
-    let veryOk = verifySignature(event)
+    Alert.alert('Event', JSON.stringify(event));
 
-    // Alert.alert(`Event is valid: ${ok} and signature is valid: ${veryOk}`)
-    connectToRelay()
+    let pub = relay.publish(event)
+    pub.on('ok', () => {
+      console.log(`${relay.url} has accepted our event`)
+    })
+    pub.on('seen', () => {
+      console.log(`we saw the event on ${relay.url}`)
+    })
+    pub.on('failed', reason => {
+      console.log(`failed to publish to ${relay.url}: ${reason}`)
+    })
+  }
 
+  useEffect(() => {
+    connectToRelay();
   }, [])
+
   return (
-    <View style={styles.container}>
-      <Text style={styles.title}>PlebChat</Text>
-      <View style={styles.separator} lightColor="#eee" darkColor="rgba(255,255,255,0.1)" />
-    </View>
+    <FlatList
+      data={messages}
+      renderItem={({item}) => <Text style={{ color: 'blue'}}>{item.content}</Text>}
+      keyExtractor={item => item.id}
+    />
   );
 }
 
@@ -81,14 +76,5 @@ const styles = StyleSheet.create({
     flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
-  },
-  title: {
-    fontSize: 20,
-    fontWeight: 'bold',
-  },
-  separator: {
-    marginVertical: 30,
-    height: 1,
-    width: '80%',
   },
 });
